@@ -8,6 +8,8 @@
 4. [Caveats](#caveats)
 5. [Examples](#examples)
 6. [Reference](#reference)
+    - [Hooks](#hooks)
+    - [Tasks](#tasks)
 7. [Compatibility](#compatibility)
 8. [Development](#development)
     - [Contributing](#contributing)
@@ -68,10 +70,9 @@ sudo crontab -e
 
 Unattended upgrades come with some risks. A number of things may go wrong, especially when upgrading to the next major release:
 
-* MergeChanges will be disabled in freebsd-update, 
-* Changes to /etc/passwd or /etc/group are not automatically 
-* Changes to system configuration files
-* Changes to drivers / hardware support
+* Changes to /etc/passwd and /etc/group are not automatically applied (because `MergeChanges` is disabled)
+* Changes to system configuration files are not automatically applied (because `MergeChanges` is disabled)
+* Changes to drivers / hardware support may cause issues
 * Packages that were renamed or removed
 * Failure in pkg's conflict/dependency resolver
 
@@ -88,7 +89,7 @@ log_debug=2
 log_syslog=1
 ```
 
-This will not only log all script output to the system logs, but also dump the output of every upgrade task and hook to `/var/log/f-upgrade`.
+This will not only log all script output to the system logs, but also dump the output of every task/hook to `/var/log/f-upgrade`.
 
 ### Hook to send mail when upgrade is finished
 
@@ -134,7 +135,7 @@ Although hooks may contain arbitrary code, some rules should apply:
 * Stick to OS tools (if possible). Try not to rely on ports/packages (they might break during upgrades).
 * Add error handling. Hook scripts are expected to return exit code 0 on success.
 
-Hook scripts may rely on and use the following env variables (provided by f-upgrade):
+Hook scripts may rely on and use the following env variables (which are exported by f-upgrade):
 
 ```
 $HOOK_OSVER (full OS release)
