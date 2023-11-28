@@ -1,0 +1,6 @@
+# Note that this task runs with the foreground option enabled,
+# because freebsd-update may issue `service` commands, that
+# would otherwise cause this task to hang.
+
+# Install new userland.
+env PAGER="/bin/cat" freebsd-update install

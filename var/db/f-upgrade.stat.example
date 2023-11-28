@@ -1,0 +1,8 @@
+# Whether this is a major upgrade.
+major=true
+# When the upgrade was started.
+start=1234567890
+# The most recently completed upgrade task.
+task_completed="0"
+# The currently running upgrade.
+upgrade=14.0

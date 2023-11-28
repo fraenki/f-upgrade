@@ -1,0 +1,44 @@
+# Required amount of free diskspace (in MiB) on the /var filesystem, where
+# freebsd-update(8) and pkg(8) will store a lot data during the upgrade.
+# The limit depends on the target release and the number of installed
+# packages. A much higher value may be required.
+# Upgrade will not start if less diskspace is available.
+free_diskspace=1024
+
+# Timeout (in s) for hook scripts.
+# Hook scripts will be aborted when the timeout is reached.
+hook_timeout=3600
+
+# Enable debug logging.
+# Supported values:
+# 0 - standard logging
+# 1 - additional debug output
+# 2 - dump output of all tasks/hooks to /var/log/f-upgrade
+log_debug=0
+
+# Enable relaying log messages to local syslog.
+# This is the only way to see what's going on.
+log_syslog=1
+
+# Maximum number of attempts to successfully run a task.
+# When this limit is reached, the task is considered failed, possibly
+# aborting the whole upgrade process.
+task_repeat=5
+
+# Timeout (in s) for individual upgrade tasks.
+# Similar to the global timeout, be aware that tasks may take
+# a long time to complete. Aborting a task might leave the
+# system in a broken and unrecoverable state. Do not set it too low.
+task_timeout=14400
+
+# Timeout for the whole upgrade process.
+# Upgrades may take a very long time, especially on network connections
+# with low bandwidth, or on slow/busy systems, or if the mirror is slow.
+# Setting the timeout too low may unnecessarely fail the upgrade.
+timeout=43200
+
+# Target version for the upgrade.
+# If this is missing or matches the currently running version, then
+# nothing will be done. Removing this option while an upgrade is currently
+# running has no effect. Upgrades cannot be interrupted.
+#upgrade="14.0"

@@ -1,0 +1,28 @@
+#!/bin/sh
+
+# KEYWORD: f-upgrade
+# PROVIDE: f-upgrade
+# REQUIRE: syslogd NETWORKING LOGIN
+
+# Add these lines to /etc/rc.conf.local or /etc/rc.conf
+# to enable this service:
+#
+# f_upgrade_enable (bool): Set to NO by default.
+#	                         Set it to YES to enable f-upgrade.
+
+. /etc/rc.subr
+
+name=f_upgrade
+rcvar=f_upgrade_enable
+
+load_rc_config $name
+
+: ${f_upgrade_enable="NO"}
+
+#procname="%%PREFIX%%/sbin/f-upgrade"
+procname="/usr/local/sbin/f-upgrade"
+command="/usr/sbin/daemon"
+command_args="-c -f -u root $procname"
+stop_cmd=":"
+
+run_rc_command "$1"

@@ -1,0 +1,625 @@
+#!/bin/sh
+
+# Copyright 2023 Frank Wall
+# All rights reserved
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted providing that the following conditions
+# are met:
+# 1. Redistributions of source code must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+# 2. Redistributions in binary form must reproduce the above copyright
+#    notice, this list of conditions and the following disclaimer in the
+#    documentation and/or other materials provided with the distribution.
+#
+# THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+# IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+# WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+# ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY
+# DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+# DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+# OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+# HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
+# STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING
+# IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+# POSSIBILITY OF SUCH DAMAGE.
+
+set -u
+
+IDENTITY="f-upgrade"
+
+CONFIGFILE="/usr/local/etc/${IDENTITY}.conf"
+
+# Directory with all pre/post hooks.
+HOOKDIR="/usr/local/etc/${IDENTITY}.hook.d"
+
+# Directory where debug logs are stored.
+LOGDIR="/var/log/${IDENTITY}"
+
+# Use a lock *directory*, because it allows to check for the lock and
+# perform the lock in a single atomic action, eliminating the possible
+# race conditions of using lock *files*.
+LOCKDIR="/tmp/${IDENTITY}.lock"
+
+# All supported configuration options.
+OPTIONS="log_debug log_syslog free_diskspace hook_timeout task_repeat task_timeout timeout upgrade"
+
+# Options that have to be present in the configuration file.
+OPTIONS_MANDATORY="free_diskspace hook_timeout task_repeat task_timeout timeout log_debug log_syslog"
+
+# Directory with all available upgrade tasks.
+TASKDIR="/usr/local/libdata/${IDENTITY}.d"
+
+# Available upgrade tasks are automatically discovered upon startup.
+TASKS=""
+
+# File that holds the current upgrade state information.
+STATEFILE="/var/db/${IDENTITY}.stat"
+
+# All supported state options.
+STATES="major task_completed start upgrade"
+
+# Defaults for required runtime variables.
+_config_log_debug=0
+_config_log_syslog=1
+
+# Forward log message to syslog.
+syslog() {
+  local prio="$1"
+  local msg="$2"
+  if [ "${_config_log_syslog}" = "1" ]; then
+    logger -t "${IDENTITY}" -p user.${prio} "${msg}"
+  fi
+}
+
+# Debug message, not visible in default configuration.
+verbose() {
+  local msg="$@"
+  if [ "$_config_log_debug" -ge "1" ]; then
+    echo $msg
+    syslog "debug" "[DEBUG] ${msg}"
+  fi
+}
+
+# Regular log message for important status information.
+log() {
+  local msg="$@"
+  echo $msg
+  syslog "notice" "[INFO] ${msg}"
+}
+
+# Log message for non-fatal errors on STDERR.
+error() {
+  local msg="$@"
+  echo "ERROR: $msg" >&2
+  syslog "err" "[ERROR] ${msg}"
+}
+
+# Log message for fatal errors and abort the script.
+fatal() {
+  local no_unlock=""
+  if [ "${1}" = "no_unlock" ]; then
+    no_unlock="true"
+    shift
+  fi
+  local msg="$@"
+  error $msg
+  if [ -z "${no_unlock}" ]; then
+    unlock
+  fi
+  exit 1
+}
+
+# Silently stop the program.
+quit() {
+  unlock
+  exit 0
+}
+
+# Create lock directory.
+lock() {
+  verbose "creating lock directory ${LOCKDIR}..."
+  if ! mkdir $LOCKDIR 2>/dev/null; then
+    fatal "no_unlock" "unable to aquire lock, script may already be running"
+  fi
+}
+
+# Remove lock directory.
+unlock() {
+  verbose "removing lock directory ${LOCKDIR}..."
+  if ! rmdir $LOCKDIR; then
+    fatal "no_unlock" "unable to remove lock directory ${LOCKDIR}"
+  fi
+}
+
+# Ensure that the script is running as root.
+checksuid() {
+  if [ $(id -u) != "0" ]; then
+    fatal "no_unlock" "requires root privileges"
+  fi
+  verbose "script is running as user root"
+}
+
+# Get a single state from the state file.
+get_state() {
+  local param="$1"
+  verbose "getting state: ${param}"
+  eval _state_${param}=$(sysrc -inf ${STATEFILE} ${param} 2>/dev/null)
+}
+
+# Set or update a state value.
+set_state() {
+  local param=${1%=*}
+  local val=${1#*=}
+  verbose "setting state: ${1}"
+  sysrc -inf ${STATEFILE} ${1} >/dev/null 2>&1
+  if [ "$?" -gt "0" ]; then
+    fatal "unable to set state ${1}"
+  fi
+  # update in-memory value
+  eval _state_${param}=$val
+}
+
+# Remove a state and its value.
+del_state() {
+  local param="$@"
+  verbose "removing state: ${param}"
+  sysrc -xinf ${STATEFILE} ${param} >/dev/null 2>&1
+  if [ "$?" -gt "0" ]; then
+    fatal "unable to remove state: ${param}"
+  fi
+  # clear in-memory value
+  eval _state_${param}=""
+}
+
+# Read the whole state file. All supported states are stored
+# in _state_$STATE variables.
+read_states() {
+  if [ ! -e "${STATEFILE}" ]; then
+    verbose "state file does not exist yet: ${STATEFILE}"
+  fi
+  for state in $STATES; do
+    get_state ${state}
+    eval _value=\${_state_$state}
+    if [ -z "${_value}" ]; then
+      verbose "got no value for state ${state}"
+      # Clear value to ensure that no env variable will be used.
+      eval _state_${state}=""
+    else
+      verbose "state ${state} is set to ${_value}"
+    fi
+  done
+}
+
+# Get a single value from the config file.
+get_config() {
+  local param="$1"
+  verbose "getting config: ${param}"
+  eval _config_${opt}=$(sysrc -inf ${CONFIGFILE} $param 2>/dev/null)
+}
+
+# Prepare the whole application configuration.
+# All options from the config file are stored # in _config_$OPTION variables.
+load_config() {
+  # A config file is mandatory.
+  if [ ! -e "${CONFIGFILE}" ]; then
+    fatal "config file not found: ${CONFIGFILE}"
+  fi
+
+  # Try to get config options from config file.
+  for opt in $OPTIONS; do
+    get_config ${opt}
+    eval _value=\${_config_$opt}
+    if [ -z "${_value}" ]; then
+      # Check if this is a mandatory option.
+      if echo $OPTIONS_MANDATORY | tr ' ' '\n' | grep -F -x -q "$opt"; then
+        fatal "mandatory option not found in config: ${opt}"
+      else
+        verbose "got no value for option ${opt}"
+        # Clear value to ensure that no env variable will be used.
+        eval _config_${opt}=""
+      fi
+    else
+      verbose "option ${opt} is set to ${_value}"
+    fi
+  done
+
+  # Get a list of available tasks.
+  for task in $(ls ${TASKDIR} | grep -e '^[0-9][0-9][0-9][0-9]*$' | sort -n); do
+    TASKS="${TASKS} ${task}"
+  done
+  verbose "discovered available tasks: ${TASKS}"
+
+  # Store OS information in global variables.
+  OS=$(uname -s)
+  OSREL=$(uname -r)
+  OSVER=$(uname -r | sed 's/\([0-9]*.[0-9]*\).*/\1/')
+  OSVER_MAJOR=${OSVER%.[0-9]*}
+  OSVER_MINOR=${OSVER#[0-9]*.}
+
+  # Store current userland and kernel version information
+  # in 4-digit notation for simplified comparison.
+  OSVER_KERNEL=$(uname -K | cut -b1-4)
+  OSVER_USER=$(uname -U | cut -b1-4)
+
+  # Ensure that the log directory exists.
+  if [ ! -d "${LOGDIR}" ]; then
+    mkdir $LOGDIR || fatal "unable to create log directory ${LOGDIR}"
+  fi
+
+  # Ensure that task/hook directories are not world writable.
+  for dir in $HOOKDIR $TASKDIR; do
+    if find ${dir} -type d -perm -2 -print | grep -qe '.*'; then
+      fatal "directory ${dir} is world writable, cowardly refusing to continue"
+    fi
+  done
+}
+
+# Get a single value from a task config file.
+# The value is not stored in a variable, but printed instead.
+get_task_config() {
+  local task="$1"
+  local config="$2"
+  _file="${TASKDIR}/${task}.conf"
+  sysrc -inf ${_file} $config 2>/dev/null
+}
+
+# Perform several sanity checks.
+# It is only executed once before startin the upgrade process,
+# otherwise the tests may return misleading results.
+sanity_check() {
+  # Validate target OS version.
+  if ! echo ${_config_upgrade} | grep -qE '^[0-9]+\.[0-9]+$' 2>/dev/null; then
+    fatal "invalid version number ${_config_upgrade} specified"
+  fi
+
+  # Get target release.
+  _tmp=`echo ${_config_upgrade} | sed 's/\([0-9]*.[0-9]*\).*/\1/'`
+  REL_MAJOR=${_tmp%.[0-9]*}
+  REL_MINOR=${_tmp#[0-9]*.}
+  verbose "configured target release: ${REL_MAJOR}.${REL_MINOR}"
+  verbose "currently running ${OS} ${OSVER_MAJOR}.${OSVER_MINOR}"
+
+  # Exit silently if target release is already installed.
+  if [ "${REL_MAJOR}" = "${OSVER_MAJOR}" -a "${REL_MINOR}" = "${OSVER_MINOR}" ]; then
+    verbose "no upgrade required"
+    quit
+  fi
+
+  # Abort if target release is lower than current release.
+  if [ "${REL_MAJOR}" != "${OSVER_MAJOR}" -a ${REL_MAJOR} -lt ${OSVER_MAJOR} ]; then
+    fatal "downgrade is not supported: ${OSVER_MAJOR} -> ${REL_MAJOR}"
+  elif [ "${REL_MAJOR}" = "${OSVER_MAJOR}" -a ${REL_MINOR} -lt ${OSVER_MINOR} ]; then
+    fatal "downgrade is not supported: ${OSVER_MAJOR}.${OSVER_MINOR} -> ${REL_MAJOR}.${REL_MINOR}"
+  fi
+
+  # Abort if trying to upgrade across multiple major releases.
+  if [ "${REL_MAJOR}" != "${OSVER_MAJOR}" -a ${REL_MAJOR} -gt ${OSVER_MAJOR} ]; then
+    _diff_major=`expr ${REL_MAJOR} - ${OSVER_MAJOR}`
+    if [ "$_diff_major" -gt 1 ]; then
+      fatal "upgrading from major release ${OSVER_MAJOR} to ${REL_MAJOR} is not supported"
+    fi
+  fi
+
+  # Abort if system runs on anything else than an official RELEASE.
+  case "${OSREL}" in
+  *-BETA* | *-RC* | *-RELEASE*)
+    verbose "system seems to be using an official release"
+    ;;
+  *)
+    fatal "unattended upgrades are not supported on this release: ${OSREL}"
+    ;;
+  esac
+
+  # Check whether it's a minor or major release upgrade.
+  if [ "${REL_MAJOR}" = "${OSVER_MAJOR}" -a ${REL_MAJOR} -gt ${OSVER_MAJOR} ]; then
+    _major="false"
+    verbose "preparing a minor release upgrade"
+  else
+    _major="true"
+    verbose "preparing a major release upgrade"
+  fi
+
+  # Check if enough free diskspace is available.
+  _free=$(df -m /var | sed 1d | awk '{print $4}')
+  if [ -z "${_free}" -o "${_free}" -lt "${_config_free_diskspace}" ]; then
+    fatal "not enough free diskspace on /var (${_free} MiB available, ${_config_free_diskspace} MiB required)"
+  fi
+
+  # Add start values to state file.
+  verbose "setting initial state values"
+  set_state upgrade=${REL_MAJOR}.${REL_MINOR}
+  set_state major=$_major
+  set_state task_completed=0
+  set_state start=$(date +%s)
+}
+
+# Run a hook script before or after a task script is executed.
+# All hook errors are considered non-fatal, because hooks should
+# not be allowed to abort the upgrade process.
+#
+# Hook scripts will be executed in the following order:
+# 1. PHASEID.type.MAJOR.MINOR (matches the exact target release)
+# 2. PHASEID.type.MAJOR (matches only the major target release)
+# 3. PHASEID.type (matches all releases)
+# e.g. 1000.pre.14.0
+#
+# Hook scripts may rely on and use the following environment variables:
+# $HOOK_OSVER (full OS release)
+# $HOOK_OSVER_MAJOR (major OS release)
+# $HOOK_OSVER_MINOR (minor OS release)
+# $HOOK_OSVER_KERNEL (4-digit kernel version)
+# $HOOK_OSVER_USER (4-digit userland version)
+# $HOOK_REL (full target release)
+# $HOOK_REL_MAJOR (major target release)
+# $HOOK_REL_MINOR (minor target release)
+# $HOOK_REL_KERNEL (4-digit target kernel version)
+# $HOOK_REL_USER (4-digit target userland version)
+run_hook() {
+  local taskid="$1"
+  local type="$2"
+
+  # Return an error if any hook ran with non-zero exit code.
+  _error=0
+
+  # Prepare environment variables.
+  export HOOK_OSVER=$OSVER
+  export HOOK_OSVER_MAJOR=$OSVER_MAJOR
+  export HOOK_OSVER_MINOR=$OSVER_MINOR
+  export HOOK_OSVER_KERNEL=$OSVER_KERNEL
+  export HOOK_OSVER_USER=$OSVER_USER
+  export HOOK_REL=$_state_upgrade
+  export HOOK_REL_MAJOR=$REL_MAJOR
+  export HOOK_REL_MINOR=$REL_MINOR
+  export HOOK_REL_KERNEL=$REL_KERNEL
+  export HOOK_REL_USER=$REL_USER
+
+  # Find and run all possible hook scripts.
+  for hook in ${type}.${REL_MAJOR}.${REL_MINOR} ${type}.${REL_MAJOR} ${type}; do
+    hook_script="${HOOKDIR}/${taskid}.${hook}"
+
+    # Silently skip non-existing hooks.
+    if [ ! -d "${HOOKDIR}" -o ! -e "${hook_script}" ]; then
+      verbose "found no hook script for ${taskid}.${hook}"
+      continue
+    fi
+
+    # Perform syntax check.
+    if sh -n ${hook_script} >/dev/null 2>&1; then
+      verbose "hook script passed syntax check: ${hook_script}"
+    else
+      error "hook script failed syntax check: ${hook_script} (ignoring)"
+      continue
+    fi
+
+    # Enable debug logging.
+    if [ "${_config_log_debug}" = "2" ]; then
+      _logfile="${LOGDIR}/upgrade_${REL_MAJOR}_${REL_MINOR}_${taskid}_${type}.log"
+    else
+      # Default: throw away all script output.
+      _logfile="/dev/null"
+    fi
+
+    # Run hook script and kill it when timeout is reached.
+    # Hook scripts always run with `--foreground`, because otherwise
+    # several commands (e.g. `service`) would halt execution and lead
+    # to a timeout.
+    verbose "executing hook script: ${hook_script}"
+    timeout --foreground -s 9 ${_config_hook_timeout} sh ${hook_script} >> ${_logfile} 2>&1
+    _exit=$?
+    if [ "$_exit" -gt "0" ]; then
+      error "hook script ran with non-zero exit code (${_exit}): ${hook_script}"
+      _error=1
+    fi
+  done
+
+  return $_error
+}
+
+# Perform a single upgrade task.
+run_task() {
+  local taskid="$1"
+
+  # Check if task file exists.
+  if [ ! -d "${TASKDIR}" -o ! -e "${TASKDIR}/${taskid}" ]; then
+    fatal "unable to find script for upgrade task ${taskid}"
+  fi
+
+  # Get config values for this task.
+  _foreground=$(get_task_config ${taskid} foreground)
+  _major=$(get_task_config ${taskid} major)
+  _repeat=$(get_task_config ${taskid} repeat)
+  _timeout=$(get_task_config ${taskid} timeout)
+
+  # Replace empty result with default values.
+  if [ -z "${_foreground}" ]; then
+    _foreground="false"
+  fi
+  if [ -z "${_major}" ]; then
+    _major="false"
+  fi
+  if [ -z "${_repeat}" ]; then
+    _repeat=$_config_task_repeat
+  fi
+  if [ -z "${_timeout}" ]; then
+    _timeout=$_config_task_timeout
+  fi
+  verbose "task config foreground=${_foreground} major=${_major} repeat=${_repeat} timeout=${_timeout}"
+
+  # Handle tasks that need to run with the `--foreground` option.
+  if [ "${_foreground}" = "true" ]; then
+    _timeout_args="--foreground"
+  else
+    _timeout_args=""
+  fi
+
+  # Handle tasks that are only valid for major upgrades.
+  if [ "${_state_major}" = "false" -a "${_major}" = "true" ]; then
+    verbose "skipping upgrade task ${taskid}: only for major upgrades"
+    return 0
+  fi
+
+  # Run pre hook script.
+  if run_hook $taskid pre; then
+    verbose "pre hook for upgrade task ${taskid} succeeded"
+  else
+    error "pre hook for upgrade task ${taskid} failed"
+  fi
+
+  # Run the task until it completes or until limits are reached.
+  task_script="${TASKDIR}/${taskid}"
+  _attempts=1
+  while [ 1 ]; do
+    # Perform syntax check.
+    if sh -n ${task_script} >/dev/null 2>&1; then
+      verbose "task script passed syntax check: ${task_script}"
+    else
+      # Every task might be crucial for the upgrade process,
+      # so treat a syntax error as fatal.
+      fatal "task script failed syntax check: ${task_script}. Cannot continue."
+    fi
+
+    # Enable debug logging.
+    if [ "${_config_log_debug}" = "2" ]; then
+      _logfile="${LOGDIR}/upgrade_${REL_MAJOR}_${REL_MINOR}_${taskid}.log"
+    else
+      # Default: throw away all script output.
+      _logfile="/dev/null"
+    fi
+
+    # Run task script and kill it when timeout is reached.
+    verbose "attempt ${_attempts} (of max ${_repeat}) to execute upgrade task ${taskid}"
+    timeout ${_timeout_args} -s 9 ${_config_task_timeout} sh ${task_script} >> ${_logfile} 2>&1
+    _exit=$?
+
+    # Success?
+    if [ "$_exit" -gt "0" ]; then
+      error "upgrade task ${taskid} ran with non-zero exit code (${_exit})"
+    else
+      verbose "upgrade task ${taskid} completed without error"
+      break
+    fi
+
+    # Task failed... continue?
+    if [ "${_attempts}" -ge "${_repeat}" ]; then
+      fatal "upgrade task ${taskid} still failed after ${_attempts} attempts. Cannot continue."
+      # XXX: Should this information be recorded in state file?
+      #      Otherwise the script will try again to run this task.
+      #      Undecided whether or not this is the desired behaviour.
+    fi
+    # Pause between attempts.
+    sleep 1
+    _attempts=$(expr $_attempts + 1)
+  done
+
+  # Run post hook script.
+  if run_hook $taskid post; then
+    verbose "post hook for upgrade task ${taskid} returned without error"
+  else
+    # Hook errors are considered non-fatal.
+    error "post hook for upgrade task ${taskid} failed"
+  fi
+}
+
+# Start or resume the process of upgrading the operating system.
+run_upgrade() {
+  # Verify that all required states are available.
+  if [ -z "${_state_upgrade}" -o -z "${_state_major}" -o -z "${_state_task_completed}" ]; then
+    fatal "state information is incomplete, cannot continue"
+  fi
+
+  # Store release information in variables. Use state information,
+  # because the config may no longer contain the target release.
+  _tmp=`echo ${_state_upgrade} | sed 's/\([0-9]*.[0-9]*\).*/\1/'`
+  REL_MAJOR=${_tmp%.[0-9]*}
+  REL_MINOR=${_tmp#[0-9]*.}
+
+  # Convert target release number to 4-digit number, it reflects
+  # the target version of the userland and kernel.
+  _minor=$(/usr/bin/printf "%02d" ${REL_MINOR})
+  REL_KERNEL="${REL_MAJOR}${_minor}"
+  REL_USER="${REL_MAJOR}${_minor}"
+
+  # Run upgrade tasks until the process completes.
+  while [ 1 ]; do
+
+    # Get ID for next task.
+    for task in $TASKS; do
+      # Skip task with same or lower ID.
+      if [ "${task}" -le "${_state_task_completed}" ]; then
+        continue
+      fi
+      _task=$task
+      break
+    done
+
+    # If no further task is received, the upgrade process is complete.
+    if [ -z "${_task}" ]; then
+      verbose "task list is empty"
+      log "system was successfully upgraded to ${REL_MAJOR}.${REL_MINOR}"
+      del_state upgrade
+      del_state major
+      del_state task_completed
+      del_state start
+      quit
+    fi
+
+    # Start upgrade task.
+    log "starting upgrade task ${_task}"
+    run_task ${_task}
+
+    # Task ran successfully.
+    log "upgrade task ${_task} completed"
+    set_state task_completed=${_task}
+    _task=""
+  done
+}
+
+# Handle arguments.
+while [ ${#} -gt 0 ]; do
+  case "${1}" in
+  -d)
+    # Enable early debug logging. May be overruled by config option.
+    _config_log_debug=1
+    shift
+    ;;
+  esac
+  shift 1
+done
+
+# Make sure utilities from the base system can be found.
+export PATH=/sbin:/bin:/usr/sbin:/usr/bin:${PATH}
+
+# Must run as root.
+checksuid
+
+# Protect against running multiple instances.
+lock
+
+# Prepare application configuration.
+load_config
+
+# Read upgrade states (if available).
+read_states
+
+# Check if an upgrade was already started.
+if [ ! -z "${_state_upgrade}" ]; then
+  log "an upgrade was already started, resuming upgrade process..."
+  # resume upgrade
+  run_upgrade
+else
+  # Check if an upgrade should be started.
+  if [ ! -z "${_config_upgrade}" ]; then
+    verbose "an upgrade request was found in config"
+    # Verify upgrade request. Exit silently if no upgrade is necessary.
+    sanity_check
+    # Start upgrade process.
+    log "starting upgrade to ${REL_MAJOR}.${REL_MINOR}..."
+    run_upgrade
+  else
+    verbose "no upgrade was requested, exiting"
+  fi
+fi
+
+unlock
+exit 0

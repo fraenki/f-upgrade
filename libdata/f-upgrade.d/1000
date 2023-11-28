@@ -1,0 +1,2 @@
+echo "WARNING: A system upgrade is in progress. Please save your work and LOGOUT NOW." | wall
+exit 0

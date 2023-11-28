@@ -1,0 +1,19 @@
+# Previous command scheduled a reboot. Give the system enough
+# time to perform the reboot without starting a new task.
+
+# Compare kernel version. This will not match until the system reboot
+# is finished.
+while [ 1 ]; do
+  # When running the new kernel, the version should match.
+  echo "Comparing kernel versions: ${HOOK_OSVER_KERNEL} / ${HOOK_REL_KERNEL}"
+  if [ "${HOOK_OSVER_KERNEL}" = "${HOOK_REL_KERNEL}" ]; then
+    echo "Confirmed: System is running the new kernel (${HOOK_REL_KERNEL})."
+    break
+  else
+    echo "Kernel version does not match (yet). Reboot may still be pending / in progress."
+  fi
+  sleep 1
+done
+exit 0
+# If the version does not match, then this task will run into a timeout
+# and fail.

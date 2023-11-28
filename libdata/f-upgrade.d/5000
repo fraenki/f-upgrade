@@ -1,0 +1,6 @@
+# safekeeping: reinstall pkg
+pkg-static install -yf pkg
+# update repo data
+pkg update -f
+# forcefully upgrade or reinstall all packages
+pkg upgrade -yf

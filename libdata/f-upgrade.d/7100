@@ -1,0 +1,6 @@
+# Previous command scheduled a reboot. Give the system enough
+# time to perform the reboot without starting a new task.
+wait=180
+echo "sleeping for ${wait} seconds..."
+sleep $wait
+exit 0

@@ -1,0 +1,2 @@
+# Install new kernel.
+env PAGER="/bin/cat" freebsd-update --not-running-from-cron install

@@ -1,0 +1,2 @@
+# Fetch upgrade files
+env PAGER="/bin/cat" freebsd-update --not-running-from-cron upgrade -r ${HOOK_REL_MAJOR}.${HOOK_REL_MINOR}-RELEASE

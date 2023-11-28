@@ -1,0 +1,3 @@
+echo test hook for major release 14
+echo HOOK_OSVER_MAJOR $HOOK_OSVER_MAJOR
+echo HOOK_REL $HOOK_REL

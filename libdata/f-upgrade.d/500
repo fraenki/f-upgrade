@@ -1,0 +1,3 @@
+# Remove the `MergeChanges` option from freebsd-update.conf,
+# because this would require user-interaction. 
+sed -i '' 's@^MergeChanges.*@# MergeChanges was removed by f-upgrade@' /etc/freebsd-update.conf
