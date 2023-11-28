@@ -19,8 +19,7 @@ load_rc_config $name
 
 : ${f_upgrade_enable="NO"}
 
-#procname="%%PREFIX%%/sbin/f-upgrade"
-procname="/usr/local/sbin/f-upgrade"
+procname="%%PREFIX%%/sbin/f-upgrade"
 command="/usr/sbin/daemon"
 command_args="-c -f -u root $procname"
 stop_cmd=":"
