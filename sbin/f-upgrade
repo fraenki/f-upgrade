@@ -321,10 +321,13 @@ sanity_check() {
   fi
 
   # Check if enough free diskspace is available.
-  _free=$(df -m /var | sed 1d | awk '{print $4}')
-  if [ -z "${_free}" -o "${_free}" -lt "${_config_free_diskspace}" ]; then
-    fatal "not enough free diskspace on /var (${_free} MiB available, ${_config_free_diskspace} MiB required)"
-  fi
+  for disk in / /usr /var; do
+    _free=$(df -m ${disk} | sed 1d | awk '{print $4}')
+    if [ -z "${_free}" -o "${_free}" -lt "${_config_free_diskspace}" ]; then
+      fatal "not enough free diskspace on ${disk} (${_free} MiB available, ${_config_free_diskspace} MiB required)"
+    fi
+    verbose "available diskspace on ${disk} is ${_free} MiB"
+  done
 
   # Add start values to state file.
   verbose "setting initial state values"
