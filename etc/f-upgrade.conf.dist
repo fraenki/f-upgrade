@@ -23,6 +23,8 @@ log_syslog=1
 # Maximum number of attempts to successfully run a task.
 # When this limit is reached, the task is considered failed, possibly
 # aborting the whole upgrade process.
+# This is the default value for all tasks, however, some tasks
+# provide their own maximum and will ignore this setting.
 task_repeat=5
 
 # Timeout (in s) for individual upgrade tasks.
@@ -35,6 +37,8 @@ task_timeout=14400
 # Upgrades may take a very long time, especially on network connections
 # with low bandwidth, or on slow/busy systems, or if the mirror is slow.
 # Setting the timeout too low may unnecessarely fail the upgrade.
+# NOTE: This feature is currently not implemented, but this timeout may
+# be enforced in a future version.
 timeout=43200
 
 # Target version for the upgrade.

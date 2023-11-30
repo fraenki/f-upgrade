@@ -22,6 +22,8 @@ f-upgrade is basically a wrapper around `freebsd-update`. However, it will also 
 
 Although f-upgrade is new software, the concept behind it was already used in server fleets in the early 2010s with great success.
 
+Note that there is also a [Puppet module available](https://forge.puppet.com/modules/fraenki/f_upgrade/readme).
+
 ## Requirements
 
 Performing unattended operating system upgrades is not impossible. However, the following requirements should be considered before attempting an upgrade:
@@ -120,6 +122,8 @@ exit 0
 ## Reference
 
 ### Hooks
+
+Hooks are arbitrary commands that are run either before or after a certain upgrade task is executed. This makes it possible to customize the upgrade process to a certain degree.
 
 Hooks are shell scripts that need to be placed in `/usr/local/etc/f-upgrade.hook.d`. Two types of hooks are supported: pre and post. Pre hooks are executed before running an upgrade task, while post hooks are executed afterwards.
 
