@@ -98,7 +98,7 @@ This will not only log all script output to the system logs, but also dump the o
 To inform someone when the upgrade is finished, add hook `/usr/local/etc/f-upgrade.hook.d/8000.post` with the following content:
 
 ```
-echo "Success" | mail -s "Uprade to ${HOOK_REL} successfully installed on $(hostname)" f-upgrade@example.com
+echo "Success" | mail -s "Upgrade to ${HOOK_REL} successfully installed on $(hostname)" f-upgrade@example.com
 ```
 
 Task ID 8000 is the final upgrade task, so this mail will be send immediately when f-upgrade reports success.
