@@ -578,6 +578,9 @@ run_upgrade() {
   done
 }
 
+# Handle signals: HUP, INT, QUIT, TRAP, TERM.
+trap 'fatal "got signal, exiting"' 1 2 3 5 15
+
 # Handle arguments.
 while [ ${#} -gt 0 ]; do
   case "${1}" in
