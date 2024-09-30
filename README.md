@@ -53,10 +53,10 @@ sudo vi /usr/local/etc/f-upgrade.conf
 upgrade=14.0
 
 # start upgrade
-sudo service f-upgrade start
+sudo service f_upgrade start
 ```
 
-Note that enabling the `f-upgrade` service is mandatory. It's not a real service, but it ensures that the upgrade process resumes after performing a reboot. The system will reboot several times during the upgrade process, so this step is crucial.
+Note that enabling the `f_upgrade` service is mandatory. It's not a real service, but it ensures that the upgrade process resumes after performing a reboot. The system will reboot several times during the upgrade process, so this step is crucial.
 
 Also note that the script and logs remain completely silent, if no upgrade is configured or when the target version matches the currently running version.
 
