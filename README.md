@@ -65,7 +65,8 @@ It's also useful to add a cron job to start f-upgrade periodically. This way an 
 ```
 sudo crontab -e
 
-15 * * * * /usr/local/sbin/f-upgrade
+# run in quiet mode
+15 * * * * /usr/local/sbin/f-upgrade -q
 ```
 
 ## Caveats

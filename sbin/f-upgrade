@@ -47,6 +47,9 @@ OPTIONS="log_debug log_syslog free_diskspace hook_timeout task_repeat task_timeo
 # Options that have to be present in the configuration file.
 OPTIONS_MANDATORY="free_diskspace hook_timeout task_repeat task_timeout timeout log_debug log_syslog"
 
+# Quiet mode: suppresses all CLI output. Useful when running from cron.
+QUIET=0
+
 # Directory with all available upgrade tasks.
 TASKDIR="/usr/local/libdata/${IDENTITY}.d"
 
@@ -63,6 +66,12 @@ STATES="major task_completed start upgrade"
 _config_log_debug=0
 _config_log_syslog=1
 
+# Suppress CLI output when quiet mode is enabled.
+quiet() {
+  [ "${QUIET}" = "0" ] && return 1
+  return 0
+}
+
 # Forward log message to syslog.
 syslog() {
   local prio="$1"
@@ -76,7 +85,7 @@ syslog() {
 verbose() {
   local msg="$@"
   if [ "$_config_log_debug" -ge "1" ]; then
-    echo $msg
+    quiet || echo $msg
     syslog "debug" "[DEBUG] ${msg}"
   fi
 }
@@ -84,14 +93,14 @@ verbose() {
 # Regular log message for important status information.
 log() {
   local msg="$@"
-  echo $msg
+  quiet || echo $msg
   syslog "notice" "[INFO] ${msg}"
 }
 
 # Log message for non-fatal errors on STDERR.
 error() {
   local msg="$@"
-  echo "ERROR: $msg" >&2
+  quiet || echo "ERROR: $msg" >&2
   syslog "err" "[ERROR] ${msg}"
 }
 
@@ -587,6 +596,11 @@ while [ ${#} -gt 0 ]; do
   -d)
     # Enable early debug logging. May be overruled by config option.
     _config_log_debug=1
+    shift
+    ;;
+  -q)
+    # Enable quiet mode; no CLI output.
+    QUIET=1
     shift
     ;;
   esac
