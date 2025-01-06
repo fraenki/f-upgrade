@@ -182,11 +182,13 @@ The gaps between task IDs are intentional, they allow to add tasks if future upg
 
 ## Compatibility
 
-f-upgrade 1.0 was successfully tested for the following upgrade paths:
+f-upgrade was successfully tested for the following upgrade paths:
 
 * FreeBSD 13.0 -> FreeBSD 13.1
 * FreeBSD 13.1 -> FreeBSD 13.2
 * FreeBSD 13.2 -> FreeBSD 14.0
+* FreeBSD 14.0 -> FreeBSD 14.1
+* FreeBSD 14.1 -> FreeBSD 14.2
 
 Some numbers from a low-end VPS (2 CPU cores, 2 GB RAM) with 80 packages installed: a minor upgrade was completed in about 15 minutes, a major upgrade was completed in about 21 minutes.
 
